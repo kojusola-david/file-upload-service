@@ -5,6 +5,8 @@ import { Readable } from 'stream';
 import { processVariant, VARIANTS, ProcessedVariant } from './services/sharp.js';
 import 'dotenv/config';
 import prisma from './db.js';
+import { multerFilter, validateMagicBytes } from './services/validation.js';
+import rateLimit from 'express-rate-limit';
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_NAME,
@@ -13,7 +15,11 @@ cloudinary.config({
 });
 
 const app = express();
-const memStorage = multer({ storage: multer.memoryStorage() });
+const memStorage = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: multerFilter,
+});
 
 function uploadToCloudinary(
   buffer: Buffer,
@@ -97,9 +103,17 @@ app.delete('/api/images/:id', async (req, res) => {
 });
 
 
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  message: { error: 'Too many uploads, please try again later' },
+});
+
 app.post('/api/upload', memStorage.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file provided' });
+
+    await validateMagicBytes(req.file.buffer);
 
     const { baseId, variants } = await processAndUpload(req.file);
 
@@ -123,7 +137,8 @@ app.post('/api/upload', memStorage.single('file'), async (req, res) => {
     res.json(image);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    res.status(500).json({ error: 'Upload failed', detail: message });
+    const status = message.startsWith('Invalid') ? 400 : 500;
+    res.status(status).json({ error: message });
   }
 });
 
