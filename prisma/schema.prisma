@@ -1,0 +1,32 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Image {
+  id         String         @id @default(cuid())
+  baseId     String         @unique
+  filename   String
+  mimetype   String
+  size       Int
+  uploadedAt DateTime       @default(now())
+  variants   ImageVariant[]
+}
+
+model ImageVariant {
+  id       String @id @default(cuid())
+  imageId  String
+  name     String
+  url      String
+  publicId String
+  image    Image  @relation(fields: [imageId], references: [id], onDelete: Cascade)
+}
