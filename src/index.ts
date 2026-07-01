@@ -89,11 +89,31 @@ app.get('/', (req, res) => {
 
 app.get('/api/images', async (req, res) => {
   try {
-    const images = await prisma.image.findMany({
-      include: { variants: true },
-      orderBy: { uploadedAt: 'desc' },
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
+    const skip = (page - 1) * limit;
+
+    const [images, total] = await Promise.all([
+      prisma.image.findMany({
+        skip,
+        take: limit,
+        include: { variants: true },
+        orderBy: { uploadedAt: 'desc' },
+      }),
+      prisma.image.count(),
+    ]);
+
+    res.json({
+      data: images,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+      },
     });
-    res.json(images);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     res.status(500).json({ error: 'Failed to fetch images', detail: message });
