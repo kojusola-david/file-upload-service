@@ -7,6 +7,8 @@ import 'dotenv/config';
 import prisma from './db.js';
 import { multerFilter, validateMagicBytes } from './services/validation.js';
 import rateLimit from 'express-rate-limit';
+import bcrypt from 'bcrypt';
+import { signToken, requireAuth } from './services/auth.js';
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_NAME,
@@ -15,10 +17,33 @@ cloudinary.config({
 });
 
 const app = express();
+app.use(express.json());
 const memStorage = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: multerFilter,
+});
+
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    const owner = await prisma.owner.findFirst({ where: { email } });
+    if (!owner) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, owner.password);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    res.json({ token: signToken(owner.id) });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
 });
 
 function uploadToCloudinary(
@@ -75,11 +100,11 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-app.delete('/api/images/:id', async (req, res) => {
+app.delete('/api/images/:id', requireAuth, async (req, res) => {
   console.log('Deleting id:', req.params.id);
   try {
     const image = await prisma.image.findFirst({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       include: { variants: true },
     });
 
@@ -93,7 +118,7 @@ app.delete('/api/images/:id', async (req, res) => {
     );
 
     // Then delete from DB (cascades to variants automatically)
-    await prisma.image.delete({ where: { id: req.params.id } });
+    await prisma.image.delete({ where: { id: req.params.id as string } });
 
     res.json({ success: true });
   } catch (err) {
@@ -109,7 +134,7 @@ const uploadLimiter = rateLimit({
   message: { error: 'Too many uploads, please try again later' },
 });
 
-app.post('/api/upload', memStorage.single('file'), async (req, res) => {
+app.post('/api/upload', uploadLimiter, requireAuth, memStorage.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file provided' });
 

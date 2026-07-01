@@ -30,3 +30,9 @@ model ImageVariant {
   publicId String
   image    Image  @relation(fields: [imageId], references: [id], onDelete: Cascade)
 }
+
+model Owner {
+  id       String @id @default(cuid())
+  email    String @unique
+  password String
+}
